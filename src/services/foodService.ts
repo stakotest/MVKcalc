@@ -63,11 +63,16 @@ function findFoodInDictionary(inputName: string): FoodDictionaryItem | null {
 }
 
 function hasUsefulNutritionData(food: {
+    hasNutritionData?: boolean | null;
     caloriesPer100g?: number | null;
     nutrients?: Array<unknown>;
 } | null | undefined): boolean {
     if (!food) {
         return false;
+    }
+
+    if (food.hasNutritionData === true) {
+        return true;
     }
 
     const hasCalories = typeof food.caloriesPer100g === 'number';
@@ -79,40 +84,53 @@ function hasUsefulNutritionData(food: {
 async function findFoodInLocalDb(inputName: string) {
     const normalized = normalizeFoodName(inputName);
 
-    const allFoods = await prisma.foodReference.findMany({
+    const exactMatch = await prisma.foodReference.findFirst({
+        where: {
+            OR: [
+                {
+                    name: {
+                        equals: normalized,
+                        mode: 'insensitive',
+                    },
+                },
+                {
+                    canonicalName: {
+                        equals: normalized,
+                        mode: 'insensitive',
+                    },
+                },
+            ],
+        },
         include: {
             nutrients: true,
         },
     });
 
-    const exactMatches = allFoods.filter((food) => {
-        const namesToCheck = [
-            food.name.toLowerCase(),
-            food.canonicalName?.toLowerCase() ?? '',
-        ];
-
-        return namesToCheck.some((item) => normalizeFoodName(item) === normalized);
-    });
-
-    const exactWithNutrition = exactMatches.find((food) => hasUsefulNutritionData(food));
-    if (exactWithNutrition) {
-        return exactWithNutrition;
+    if (exactMatch) {
+        return exactMatch;
     }
 
-    if (exactMatches.length > 0) {
-        return exactMatches[0];
-    }
-
-    const partialMatches = allFoods.filter((food) => {
-        const namesToCheck = [
-            food.name.toLowerCase(),
-            food.canonicalName?.toLowerCase() ?? '',
-        ];
-
-        return namesToCheck.some((item) => {
-            const normalizedItem = normalizeFoodName(item);
-            return normalizedItem.includes(normalized) || normalized.includes(normalizedItem);
-        });
+    const partialMatches = await prisma.foodReference.findMany({
+        where: {
+            OR: [
+                {
+                    name: {
+                        contains: normalized,
+                        mode: 'insensitive',
+                    },
+                },
+                {
+                    canonicalName: {
+                        contains: normalized,
+                        mode: 'insensitive',
+                    },
+                },
+            ],
+        },
+        include: {
+            nutrients: true,
+        },
+        take: 10,
     });
 
     const partialWithNutrition = partialMatches.find((food) => hasUsefulNutritionData(food));
@@ -120,11 +138,7 @@ async function findFoodInLocalDb(inputName: string) {
         return partialWithNutrition;
     }
 
-    if (partialMatches.length > 0) {
-        return partialMatches[0];
-    }
-
-    return null;
+    return partialMatches[0] ?? null;
 }
 
 async function saveUsdaFoodToDb(usdaFood: SavedUsdaFood) {
@@ -143,6 +157,7 @@ async function saveUsdaFoodToDb(usdaFood: SavedUsdaFood) {
             fatPer100g: usdaFood.fatPer100g,
             carbsPer100g: usdaFood.carbsPer100g,
             fiberPer100g: usdaFood.fiberPer100g,
+            hasNutritionData: usdaFood.nutrients.length > 0 || usdaFood.caloriesPer100g != null,
         },
         create: {
             source: usdaFood.source,
@@ -154,6 +169,7 @@ async function saveUsdaFoodToDb(usdaFood: SavedUsdaFood) {
             fatPer100g: usdaFood.fatPer100g,
             carbsPer100g: usdaFood.carbsPer100g,
             fiberPer100g: usdaFood.fiberPer100g,
+            hasNutritionData: usdaFood.nutrients.length > 0 || usdaFood.caloriesPer100g != null,
         },
     });
 

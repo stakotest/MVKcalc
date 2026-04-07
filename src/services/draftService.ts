@@ -7,7 +7,7 @@ import {
 import { prisma } from '../db/prisma';
 import { getUserByTelegramId } from './userService';
 import { updateUserChatState } from './chatStateService';
-import { addMealFromText } from './mealService';
+import { addMealFromParsedItems } from './mealService';
 
 type DraftItemInput = {
     name: string;
@@ -249,7 +249,7 @@ export async function confirmActiveDraft(telegramId: number) {
 
     const rawInput = draft.items
         .map((item) => {
-            if (item.estimatedGrams) {
+            if (item.estimatedGrams != null) {
                 return `${item.name} ${item.isApproximate ? '~' : ''}${item.estimatedGrams} г`;
             }
 
@@ -257,11 +257,21 @@ export async function confirmActiveDraft(telegramId: number) {
         })
         .join('\n');
 
-    const meal = await addMealFromText({
+    const meal = await addMealFromParsedItems({
         telegramId,
         rawInput,
         mealType: draft.mealType ?? undefined,
         title: draft.mealType ?? undefined,
+        items: draft.items.map((item) => ({
+            productName: item.name,
+            amountValue: item.estimatedGrams ?? undefined,
+            amountUnit: item.estimatedGrams != null ? 'г' : undefined,
+            isApproximate: item.isApproximate,
+            rawText:
+                item.estimatedGrams != null
+                    ? `${item.name} ${item.isApproximate ? '~' : ''}${item.estimatedGrams} г`
+                    : item.name,
+        })),
     });
 
     await prisma.mealDraft.update({

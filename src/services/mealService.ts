@@ -1,12 +1,12 @@
 import { prisma } from '../db/prisma';
-import { parseFoodText } from '../utils/parseFoodText';
+import { parseFoodText, ParsedFoodItem } from '../utils/parseFoodText';
 import { getUserByTelegramId } from './userService';
 import { findFoodByName } from './foodService';
 import { calculateNutrientsForAmount } from './nutrientCalculator';
 import { getEndOfDay, getStartOfDay } from '../utils/dateRange';
 
 function normalizeAmountToGrams(amountValue?: number, amountUnit?: string): number | null {
-    if (!amountValue) {
+    if (amountValue == null) {
         return null;
     }
 
@@ -35,19 +35,103 @@ function normalizeAmountToGrams(amountValue?: number, amountUnit?: string): numb
     return amountValue;
 }
 
-export async function addMealFromText(params: {
+async function createMealItemWithNutrition(params: {
+    mealId: string;
+    productName: string;
+    amountValue?: number;
+    amountUnit?: string;
+    isApproximate?: boolean;
+    rawText?: string;
+}) {
+    let matchedFood = null;
+
+    try {
+        matchedFood = await findFoodByName(params.productName);
+    } catch (error) {
+        console.error(`Food lookup failed for "${params.productName}":`, error);
+        matchedFood = null;
+    }
+
+    const amountInGrams = normalizeAmountToGrams(params.amountValue, params.amountUnit);
+
+    let calculatedCalories: number | null =
+        matchedFood?.caloriesPer100g != null && amountInGrams !== null
+            ? Number(((matchedFood.caloriesPer100g * amountInGrams) / 100).toFixed(2))
+            : null;
+
+    const createdMealItem = await prisma.mealItem.create({
+        data: {
+            mealId: params.mealId,
+            productName: params.productName,
+            amountValue: params.amountValue,
+            amountUnit: params.amountUnit,
+            isApproximate: params.isApproximate ?? false,
+            rawText: params.rawText,
+            linkedFoodId: matchedFood?.id,
+            caloriesKcal: calculatedCalories,
+        },
+    });
+
+    if (!matchedFood || amountInGrams === null) {
+        return createdMealItem;
+    }
+
+    try {
+        const nutrients = matchedFood.nutrients ?? [];
+
+        if (nutrients.length) {
+            const snapshots = calculateNutrientsForAmount(nutrients, amountInGrams);
+
+            if (snapshots.length) {
+                await prisma.mealItemNutrientSnapshot.createMany({
+                    data: snapshots.map((nutrient) => ({
+                        mealItemId: createdMealItem.id,
+                        nutrientCode: nutrient.nutrientCode,
+                        nutrientName: nutrient.nutrientName,
+                        unit: nutrient.unit,
+                        amount: nutrient.amount,
+                    })),
+                });
+
+                if (calculatedCalories === null) {
+                    const energySnapshot = snapshots.find(
+                        (nutrient) => nutrient.nutrientCode === 'ENERGY_KCAL'
+                    );
+
+                    if (energySnapshot) {
+                        calculatedCalories = Number(energySnapshot.amount.toFixed(2));
+
+                        await prisma.mealItem.update({
+                            where: {
+                                id: createdMealItem.id,
+                            },
+                            data: {
+                                caloriesKcal: calculatedCalories,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error(`Nutrient snapshot creation failed for "${params.productName}":`, error);
+    }
+
+    return createdMealItem;
+}
+
+export async function addMealFromParsedItems(params: {
     telegramId: number;
-    rawInput: string;
     mealType?: string;
     title?: string;
+    rawInput: string;
+    items: ParsedFoodItem[];
 }) {
     const user = await getUserByTelegramId(params.telegramId);
 
     if (!user) {
         throw new Error('User not found');
     }
-
-    const parsedItems = parseFoodText(params.rawInput);
 
     const meal = await prisma.meal.create({
         data: {
@@ -59,116 +143,15 @@ export async function addMealFromText(params: {
         },
     });
 
-    for (const item of parsedItems) {
-        let matchedFood = null;
-
-        try {
-            matchedFood = await findFoodByName(item.productName);
-        } catch (error) {
-            console.error(`Food lookup failed for "${item.productName}":`, error);
-            matchedFood = null;
-        }
-
-        const amountInGrams = normalizeAmountToGrams(item.amountValue, item.amountUnit);
-
-        let calculatedCalories: number | null =
-            matchedFood?.caloriesPer100g != null && amountInGrams
-                ? Number(((matchedFood.caloriesPer100g * amountInGrams) / 100).toFixed(2))
-                : null;
-
-        const createdMealItem = await prisma.mealItem.create({
-            data: {
-                mealId: meal.id,
-                productName: item.productName,
-                amountValue: item.amountValue,
-                amountUnit: item.amountUnit,
-                isApproximate: item.isApproximate,
-                rawText: item.rawText,
-                linkedFoodId: matchedFood?.id,
-                caloriesKcal: calculatedCalories,
-            },
+    for (const item of params.items) {
+        await createMealItemWithNutrition({
+            mealId: meal.id,
+            productName: item.productName,
+            amountValue: item.amountValue,
+            amountUnit: item.amountUnit,
+            isApproximate: item.isApproximate,
+            rawText: item.rawText,
         });
-
-        if (matchedFood && amountInGrams) {
-            try {
-                let nutrients = matchedFood.nutrients ?? [];
-
-                if (!nutrients.length) {
-                    const refreshed = await findFoodByName(item.productName);
-
-                    if (refreshed?.nutrients?.length) {
-                        nutrients = refreshed.nutrients;
-                        matchedFood = refreshed;
-
-                        if (matchedFood.id !== createdMealItem.linkedFoodId) {
-                            await prisma.mealItem.update({
-                                where: {
-                                    id: createdMealItem.id,
-                                },
-                                data: {
-                                    linkedFoodId: matchedFood.id,
-                                },
-                            });
-                        }
-
-                        if (
-                            calculatedCalories === null &&
-                            matchedFood.caloriesPer100g != null
-                        ) {
-                            calculatedCalories = Number(
-                                ((matchedFood.caloriesPer100g * amountInGrams) / 100).toFixed(2)
-                            );
-
-                            await prisma.mealItem.update({
-                                where: {
-                                    id: createdMealItem.id,
-                                },
-                                data: {
-                                    caloriesKcal: calculatedCalories,
-                                },
-                            });
-                        }
-                    }
-                }
-
-                if (nutrients.length) {
-                    const snapshots = calculateNutrientsForAmount(nutrients, amountInGrams);
-
-                    if (snapshots.length) {
-                        await prisma.mealItemNutrientSnapshot.createMany({
-                            data: snapshots.map((nutrient) => ({
-                                mealItemId: createdMealItem.id,
-                                nutrientCode: nutrient.nutrientCode,
-                                nutrientName: nutrient.nutrientName,
-                                unit: nutrient.unit,
-                                amount: nutrient.amount,
-                            })),
-                        });
-
-                        if (calculatedCalories === null) {
-                            const energySnapshot = snapshots.find(
-                                (nutrient) => nutrient.nutrientCode === 'ENERGY_KCAL'
-                            );
-
-                            if (energySnapshot) {
-                                calculatedCalories = Number(energySnapshot.amount.toFixed(2));
-
-                                await prisma.mealItem.update({
-                                    where: {
-                                        id: createdMealItem.id,
-                                    },
-                                    data: {
-                                        caloriesKcal: calculatedCalories,
-                                    },
-                                });
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error(`Nutrient snapshot creation failed for "${item.productName}":`, error);
-            }
-        }
     }
 
     return prisma.meal.findUnique({
@@ -181,6 +164,23 @@ export async function addMealFromText(params: {
                 },
             },
         },
+    });
+}
+
+export async function addMealFromText(params: {
+    telegramId: number;
+    rawInput: string;
+    mealType?: string;
+    title?: string;
+}) {
+    const parsedItems = parseFoodText(params.rawInput);
+
+    return addMealFromParsedItems({
+        telegramId: params.telegramId,
+        rawInput: params.rawInput,
+        mealType: params.mealType,
+        title: params.title,
+        items: parsedItems,
     });
 }
 

@@ -49,23 +49,23 @@ enum ChatStateType {
 }
 
 model User {
-  id               String          @id @default(cuid())
-  telegramId       BigInt          @unique
+  id               String   @id @default(cuid())
+  telegramId       BigInt   @unique
   telegramUsername String?
   firstName        String?
   lastName         String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  profile          UserProfile?
-  meals            Meal[]
-  mealDrafts       MealDraft[]
-  chatState        UserChatState?
+  profile    UserProfile?
+  meals      Meal[]
+  mealDrafts MealDraft[]
+  chatState  UserChatState?
 }
 
 model UserProfile {
-  id            String        @id @default(cuid())
-  userId        String        @unique
+  id            String         @id @default(cuid())
+  userId        String         @unique
   name          String?
   age           Int?
   weightKg      Float?
@@ -73,136 +73,140 @@ model UserProfile {
   gender        Gender?
   activityLevel ActivityLevel?
   goal          GoalType?
-  timezone      String?       @default("Europe/Amsterdam")
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  timezone      String?        @default("Europe/Amsterdam")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Meal {
-  id        String      @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
   title     String?
   mealType  String?
   eatenAt   DateTime
   rawInput  String
-  createdAt DateTime    @default(now())
+  createdAt DateTime @default(now())
 
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items     MealItem[]
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items MealItem[]
 }
 
 model MealItem {
-  id                String                   @id @default(cuid())
-  mealId            String
-  productName       String
-  amountValue       Float?
-  amountUnit        String?
-  isApproximate     Boolean                  @default(false)
-  rawText           String?
-  linkedFoodId      String?
-  caloriesKcal      Float?
-  createdAt         DateTime                 @default(now())
+  id            String   @id @default(cuid())
+  mealId        String
+  productName   String
+  amountValue   Float?
+  amountUnit    String?
+  isApproximate Boolean  @default(false)
+  rawText       String?
+  linkedFoodId  String?
+  caloriesKcal  Float?
+  createdAt     DateTime @default(now())
 
-  meal              Meal                     @relation(fields: [mealId], references: [id], onDelete: Cascade)
-  linkedFood        FoodReference?           @relation(fields: [linkedFoodId], references: [id], onDelete: SetNull)
+  meal              Meal                       @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  linkedFood        FoodReference?             @relation(fields: [linkedFoodId], references: [id], onDelete: SetNull)
   nutrientSnapshots MealItemNutrientSnapshot[]
 }
 
 model FoodReference {
-  id                String                   @id @default(cuid())
-  source            String
-  externalId        String
-  name              String
-  canonicalName     String?
-  portionBasis      String?                  @default("100g")
-  caloriesPer100g   Float?
-  proteinPer100g    Float?
-  fatPer100g        Float?
-  carbsPer100g      Float?
-  fiberPer100g      Float?
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
+  id               String   @id @default(cuid())
+  source           String
+  externalId       String
+  name             String
+  canonicalName    String?
+  portionBasis     String?  @default("100g")
+  caloriesPer100g  Float?
+  proteinPer100g   Float?
+  fatPer100g       Float?
+  carbsPer100g     Float?
+  fiberPer100g     Float?
+  hasNutritionData Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  nutrients         FoodNutrient[]
-  mealItems         MealItem[]
+  nutrients FoodNutrient[]
+  mealItems MealItem[]
 
   @@unique([source, externalId])
+  @@index([name])
+  @@index([canonicalName])
+  @@index([hasNutritionData])
 }
 
 model FoodNutrient {
-  id              String        @id @default(cuid())
-  foodId          String
-  nutrientCode    String
-  nutrientName    String
-  unit            String
-  amountPer100g   Float
-  createdAt       DateTime      @default(now())
+  id            String   @id @default(cuid())
+  foodId        String
+  nutrientCode  String
+  nutrientName  String
+  unit          String
+  amountPer100g Float
+  createdAt     DateTime @default(now())
 
-  food            FoodReference @relation(fields: [foodId], references: [id], onDelete: Cascade)
+  food FoodReference @relation(fields: [foodId], references: [id], onDelete: Cascade)
 
   @@unique([foodId, nutrientCode])
 }
 
 model MealItemNutrientSnapshot {
-  id              String      @id @default(cuid())
-  mealItemId      String
-  nutrientCode    String
-  nutrientName    String
-  unit            String
-  amount          Float
-  createdAt       DateTime    @default(now())
+  id           String   @id @default(cuid())
+  mealItemId   String
+  nutrientCode String
+  nutrientName String
+  unit         String
+  amount       Float
+  createdAt    DateTime @default(now())
 
-  mealItem        MealItem    @relation(fields: [mealItemId], references: [id], onDelete: Cascade)
+  mealItem MealItem @relation(fields: [mealItemId], references: [id], onDelete: Cascade)
 
   @@index([mealItemId])
   @@index([nutrientCode])
 }
 
 model MealDraft {
-  id           String               @id @default(cuid())
-  userId       String
-  sourceText   String
-  mealType     String?
-  status       DraftStatus          @default(PENDING)
-  parsedBy     DraftParsedBy
-  confidence   Float?
-  comment      String?
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  id         String        @id @default(cuid())
+  userId     String
+  sourceText String
+  mealType   String?
+  status     DraftStatus   @default(PENDING)
+  parsedBy   DraftParsedBy
+  confidence Float?
+  comment    String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 
-  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items        MealDraftItem[]
-  chatStates   UserChatState[]
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items      MealDraftItem[]
+  chatStates UserChatState[]
 
   @@index([userId, status])
 }
 
 model MealDraftItem {
-  id              String              @id @default(cuid())
-  draftId         String
-  name            String
-  estimatedGrams  Float?
-  isApproximate   Boolean             @default(true)
-  sourceType      DraftItemSourceType @default(DIRECT)
-  position        Int
-  createdAt       DateTime            @default(now())
+  id             String              @id @default(cuid())
+  draftId        String
+  name           String
+  estimatedGrams Float?
+  isApproximate  Boolean             @default(true)
+  sourceType     DraftItemSourceType @default(DIRECT)
+  position       Int
+  createdAt      DateTime            @default(now())
 
-  draft           MealDraft           @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draft MealDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
 
   @@index([draftId])
 }
 
 model UserChatState {
-  id             String         @id @default(cuid())
-  userId         String         @unique
-  activeDraftId  String?
-  state          ChatStateType  @default(IDLE)
-  lastMessage    String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id            String        @id @default(cuid())
+  userId        String        @unique
+  activeDraftId String?
+  state         ChatStateType @default(IDLE)
+  lastMessage   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  activeDraft    MealDraft?     @relation(fields: [activeDraftId], references: [id], onDelete: SetNull)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeDraft MealDraft? @relation(fields: [activeDraftId], references: [id], onDelete: SetNull)
 }
