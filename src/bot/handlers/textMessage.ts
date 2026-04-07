@@ -1,5 +1,5 @@
 import { Context } from 'telegraf';
-import { getUserChatState } from '../../services/chatStateService';
+import { getUserChatState, resetUserChatState } from '../../services/chatStateService';
 import {
     appendItemsToActiveDraft,
     createMealDraft,
@@ -15,6 +15,7 @@ import { draftKeyboard } from '../keyboards/draftKeyboard';
 import { shouldUseAiParser } from '../../utils/shouldUseAiParser';
 import { isDraftEditLikeMessage } from '../../utils/isDraftEditLikeMessage';
 import { handleMenuText } from './menuHandler';
+import { getProductNutritionReport } from '../../services/productNutritionLookupService';
 
 const CONFIRM_WORDS = ['да', 'сохранить', 'ок', 'окей', 'yes', 'save'];
 const CANCEL_WORDS = ['нет', 'отмена', 'cancel', 'stop'];
@@ -93,6 +94,22 @@ export async function textMessageHandler(ctx: Context) {
 
     const chatState = await getUserChatState(ctx.from.id);
     const normalized = text.toLowerCase();
+
+    if (
+        chatState?.state === 'WAITING_EDIT' &&
+        chatState.lastMessage === 'PRODUCT_NUTRITION_LOOKUP'
+    ) {
+        if (CANCEL_WORDS.includes(normalized)) {
+            await resetUserChatState(ctx.from.id);
+            await ctx.reply('Поиск нутриентов отменён.');
+            return;
+        }
+
+        const report = await getProductNutritionReport(text);
+        await resetUserChatState(ctx.from.id);
+        await ctx.reply(report.message);
+        return;
+    }
 
     if (chatState?.state === 'WAITING_CONFIRMATION') {
         if (CONFIRM_WORDS.includes(normalized)) {

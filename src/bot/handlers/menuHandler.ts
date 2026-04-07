@@ -1,4 +1,5 @@
 import { Context } from 'telegraf';
+import { ChatStateType } from '@prisma/client';
 import { BUTTONS } from '../../constants/buttons';
 import { getMainKeyboard } from '../keyboards/mainKeyboard';
 import { getReportsKeyboard } from '../keyboards/reportsKeyboard';
@@ -7,6 +8,8 @@ import { deleteLastMeal } from '../../services/meal/deleteLastMeal';
 import { dayReportCommand } from '../commands/dayReport';
 import { weekReportCommand } from '../commands/weekReport';
 import { monthReportCommand } from '../commands/monthReport';
+import { myNormsCommand } from '../commands/myNorms';
+import { updateUserChatState } from '../../services/chatStateService';
 
 function getTelegramUserId(ctx: Context): string | null {
     if (!ctx.from?.id) {
@@ -34,6 +37,15 @@ export async function handleMenuText(ctx: Context): Promise<boolean> {
     }
 
     if (text === BUTTONS.BACK) {
+        if (ctx.from) {
+            await updateUserChatState({
+                telegramId: ctx.from.id,
+                state: ChatStateType.IDLE,
+                activeDraftId: null,
+                lastMessage: null,
+            });
+        }
+
         await ctx.reply('Главное меню:', getMainKeyboard());
         return true;
     }
@@ -46,11 +58,17 @@ export async function handleMenuText(ctx: Context): Promise<boolean> {
                 '• Пиши еду обычным текстом',
                 '• Я покажу черновик перед сохранением',
                 '• Отчёты и действия доступны через кнопки',
+                '• Можно посмотреть свои нормы',
+                '• Можно узнать нутриенты конкретного продукта',
                 '',
-                'Пример:',
+                'Примеры:',
                 'гречка 150 г',
                 'курица 200 г',
                 'огурцы 100 г',
+                '',
+                'Для продукта:',
+                'морковь 150 г',
+                'банан',
             ].join('\n'),
             getMainKeyboard()
         );
@@ -60,6 +78,39 @@ export async function handleMenuText(ctx: Context): Promise<boolean> {
     if (text === BUTTONS.ADD_MEAL) {
         await ctx.reply(
             'Напиши, что ты съел.\n\nПример:\nгречка 150 г\nкурица 200 г\nяблоко 100 г',
+            getMainKeyboard()
+        );
+        return true;
+    }
+
+    if (text === BUTTONS.MY_NORMS) {
+        await myNormsCommand(ctx);
+        return true;
+    }
+
+    if (text === BUTTONS.PRODUCT_NUTRIENTS) {
+        if (!ctx.from) {
+            return true;
+        }
+
+        await updateUserChatState({
+            telegramId: ctx.from.id,
+            state: ChatStateType.WAITING_EDIT,
+            activeDraftId: null,
+            lastMessage: 'PRODUCT_NUTRITION_LOOKUP',
+        });
+
+        await ctx.reply(
+            [
+                'Напиши продукт, для которого показать нутриенты.',
+                '',
+                'Примеры:',
+                'морковь 150 г',
+                'банан',
+                'лосось 200 г',
+                '',
+                'Если вес не укажешь, я посчитаю за 100 г.',
+            ].join('\n'),
             getMainKeyboard()
         );
         return true;
